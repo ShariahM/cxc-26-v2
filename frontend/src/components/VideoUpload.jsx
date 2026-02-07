@@ -1,8 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { uploadVideo } from '../services/api.js';
 
 const VideoUpload = ({ onUploadSuccess, onUploadError }) => {
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState(null);
 
   const onDrop = useCallback(async (acceptedFiles, rejectedFiles) => {
@@ -32,13 +34,16 @@ const VideoUpload = ({ onUploadSuccess, onUploadError }) => {
 
     const file = acceptedFiles[0];
     setIsUploading(true);
+    setUploadProgress(0);
 
     try {
-      // Import the API function
-      const { uploadVideo } = await import('../services/api.js');
-      
       // Upload the video
-      const response = await uploadVideo(file);
+      const response = await uploadVideo(file, (progressEvent) => {
+        const total = progressEvent.total || file.size || 0;
+        if (total > 0) {
+          setUploadProgress(Math.round((progressEvent.loaded * 100) / total));
+        }
+      });
       
       if (onUploadSuccess) {
         onUploadSuccess(response);
@@ -76,7 +81,7 @@ const VideoUpload = ({ onUploadSuccess, onUploadError }) => {
           {isUploading ? (
             <>
               <div className="spinner"></div>
-              <p>Uploading video...</p>
+              <p>Uploading video... {uploadProgress}%</p>
             </>
           ) : isDragActive ? (
             <>

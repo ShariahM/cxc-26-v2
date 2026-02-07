@@ -69,11 +69,16 @@ async def upload_video(file: UploadFile = File(...)):
     
     # Save uploaded file
     file_path = UPLOAD_DIR / f"{task_id}.mp4"
+    chunk_size = 1024 * 1024  # 1MB chunks
     
     try:
         async with aiofiles.open(file_path, 'wb') as f:
-            content = await file.read()
-            await f.write(content)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                await f.write(chunk)
+        await file.close()
     except Exception as e:
         raise HTTPException(
             status_code=500,
