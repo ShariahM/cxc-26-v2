@@ -155,11 +155,13 @@ class VideoProcessor:
         frame_id: int
     ) -> np.ndarray:
         """Annotate frame with all visualizations"""
-        # Draw tracking with team info
-        annotated = self.tracker.draw_tracks(frame, tracked_detections, show_trails=True)
+        annotated = frame.copy()
         
-        # Draw team assignments
+        # Draw team-colored bounding boxes and tracking trails
         annotated = self._draw_team_assignments(annotated, tracked_detections)
+        
+        # Draw tracking trails
+        annotated = self._draw_tracking_trails(annotated, tracked_detections)
         
         # Draw openscores
         annotated = self.openscore_calc.draw_openscores(
@@ -200,32 +202,67 @@ class VideoProcessor:
         frame: np.ndarray,
         tracked_detections: list
     ) -> np.ndarray:
-        """Draw team information on frame"""
-        team_colors = {
-            0: (255, 0, 0),    # Team 0: Blue
-            1: (0, 0, 255)      # Team 1: Red
-        }
-        
+        """Draw team-colored bounding boxes on frame"""
         for det in tracked_detections:
             track_id = det['track_id']
             bbox = det['bbox']
             team_id = det.get('team_id', -1)
+            team_color = det.get('team_color', (128, 128, 128))
             
-            if track_id >= 0 and team_id >= 0:
+            if track_id >= 0:
                 x1, y1, x2, y2 = [int(coord) for coord in bbox]
-                color = team_colors.get(team_id, (128, 128, 128))
                 
-                # Draw team label
-                team_label = f"Team {team_id}"
+                # Draw bounding box with team color (thicker for visibility)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, 3)
+                
+                # Draw track ID with team color background
+                track_label = f"ID: {track_id}"
+                text_size = cv2.getTextSize(track_label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                text_x, text_y = x1, max(y1 - 5, 20)
+                
+                # Draw background rectangle for text
+                cv2.rectangle(
+                    frame,
+                    (text_x - 2, text_y - text_size[1] - 2),
+                    (text_x + text_size[0] + 2, text_y + 2),
+                    team_color,
+                    -1
+                )
+                
+                # Draw text
                 cv2.putText(
                     frame,
-                    team_label,
-                    (x1, max(y1 - 30, 30)),
+                    track_label,
+                    (text_x, text_y),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
+                    0.6,
+                    (255, 255, 255),
                     2
                 )
+        
+        return frame
+    
+    def _draw_tracking_trails(
+        self,
+        frame: np.ndarray,
+        tracked_detections: list
+    ) -> np.ndarray:
+        """Draw tracking trails in team colors"""
+        for det in tracked_detections:
+            track_id = det['track_id']
+            team_color = det.get('team_color', (128, 128, 128))
+            
+            if track_id >= 0:
+                history = self.tracker.get_track_history(track_id, window=30)
+                if len(history) > 1:
+                    points = np.array([h['center'] for h in history], dtype=np.int32)
+                    cv2.polylines(
+                        frame,
+                        [points],
+                        False,
+                        team_color,
+                        2
+                    )
         
         return frame
     

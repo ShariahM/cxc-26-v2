@@ -22,8 +22,12 @@ class PlayerClassifier:
         # Store persistent team assignments by track_id
         self.team_assignments = {}  # track_id -> team_id (0 or 1)
         
-        # Store team colors (HSV)
-        self.team_colors = {}  # team_id -> (hue_mean, sat_mean, val_mean)
+        # Store team colors (HSV) and BGR for visualization
+        self.team_colors_hsv = {}  # team_id -> (hue_mean, sat_mean, val_mean)
+        self.team_colors_bgr = {}  # team_id -> (b, g, r) for visualization
+        
+        # Store jersey colors for each player
+        self.player_colors = {}  # track_id -> HSV color
         
         # Collect color samples for clustering
         self.color_samples = defaultdict(list)  # track_id -> list of HSV colors
@@ -89,9 +93,9 @@ class PlayerClassifier:
             tracked_detections: List of tracked detections with track_ids
             
         Returns:
-            Detections with added 'team_id' field
+            Detections with added 'team_id' and 'team_color' fields
         """
-        # Collect color samples
+        # Collect color samples and classify
         for det in tracked_detections:
             track_id = det['track_id']
             
@@ -100,8 +104,18 @@ class PlayerClassifier:
             
             color = self.extract_jersey_color(frame, det['bbox'])
             
-            if color is not None and track_id not in self.team_assignments:
-                self.color_samples[track_id].append(color)
+            if color is not None:
+                self.player_colors[track_id] = color
+                
+                # If not yet assigned
+                if track_id not in self.team_assignments:
+                    if not self.teams_determined:
+                        # Collect samples until teams are determined
+                        self.color_samples[track_id].append(color)
+                    else:
+                        # Classify immediately based on team colors
+                        team_id = self._classify_to_nearest_team(color)
+                        self.team_assignments[track_id] = team_id
         
         # Try to determine teams once we have enough samples
         if not self.teams_determined and len(self.color_samples) >= self.num_teams:
@@ -113,8 +127,13 @@ class PlayerClassifier:
             
             if track_id in self.team_assignments:
                 det['team_id'] = self.team_assignments[track_id]
+                det['team_color'] = self.team_colors_bgr.get(
+                    self.team_assignments[track_id],
+                    (128, 128, 128)
+                )
             else:
                 det['team_id'] = -1  # Unclassified
+                det['team_color'] = (128, 128, 128)
         
         return tracked_detections
     
@@ -145,14 +164,56 @@ class PlayerClassifier:
                 self.team_assignments[track_id] = int(team_id)
                 self.color_samples[track_id] = []  # Clear samples after assignment
             
-            # Store team colors
+            # Store team colors (HSV)
             for team_id, center in enumerate(kmeans.cluster_centers_):
-                self.team_colors[team_id] = tuple(center.astype(int))
+                hsv_color = tuple(center.astype(int))
+                self.team_colors_hsv[team_id] = hsv_color
+                # Convert HSV to BGR for visualization
+                self.team_colors_bgr[team_id] = self._hsv_to_bgr(hsv_color)
             
             self.teams_determined = True
         
         except Exception as e:
             print(f"Error determining teams: {e}")
+    
+    def _classify_to_nearest_team(self, color: np.ndarray) -> int:
+        """
+        Classify a color to the nearest team based on Euclidean distance in HSV space
+        
+        Args:
+            color: HSV color as array
+            
+        Returns:
+            Team ID (0 or 1)
+        """
+        if not self.team_colors_hsv:
+            return 0
+        
+        min_distance = float('inf')
+        nearest_team = 0
+        
+        for team_id, team_color in self.team_colors_hsv.items():
+            distance = np.sqrt(np.sum((color - np.array(team_color))**2))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_team = team_id
+        
+        return nearest_team
+    
+    def _hsv_to_bgr(self, hsv_color: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """
+        Convert HSV color to BGR
+        
+        Args:
+            hsv_color: (H, S, V) tuple
+            
+        Returns:
+            (B, G, R) tuple
+        """
+        hsv_img = np.uint8([[[hsv_color[0], hsv_color[1], hsv_color[2]]]])
+        bgr_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
+        b, g, r = bgr_img[0][0]
+        return (int(b), int(g), int(r))
     
     def reassign_team(self, track_id: int, team_id: int) -> None:
         """
@@ -175,6 +236,10 @@ class PlayerClassifier:
         """Get all team assignments"""
         return self.team_assignments.copy()
     
+    def get_team_color_bgr(self, team_id: int) -> Tuple[int, int, int]:
+        """Get BGR color for a team"""
+        return self.team_colors_bgr.get(team_id, (128, 128, 128))
+    
     def get_team_stats(self) -> Dict[int, int]:
         """Get count of players per team"""
         stats = {team_id: 0 for team_id in range(self.num_teams)}
@@ -186,6 +251,8 @@ class PlayerClassifier:
         """Reset classifier (for new game/video)"""
         self.team_assignments = {}
         self.color_samples = defaultdict(list)
-        self.team_colors = {}
+        self.team_colors_hsv = {}
+        self.team_colors_bgr = {}
+        self.player_colors = {}
         self.teams_determined = False
 
