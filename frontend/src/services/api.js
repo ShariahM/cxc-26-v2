@@ -5,24 +5,20 @@ const API_BASE_URL = 'http://localhost:8000';
 // Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 /**
  * Upload video file for analysis
  * @param {File} file - MP4 video file
+ * @param {function} [onUploadProgress] - Optional upload progress callback
  * @returns {Promise} - Upload response with task_id
  */
-export const uploadVideo = async (file) => {
+export const uploadVideo = async (file, onUploadProgress) => {
   const formData = new FormData();
   formData.append('file', file);
 
   const response = await apiClient.post('/api/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+    onUploadProgress,
   });
 
   return response.data;
