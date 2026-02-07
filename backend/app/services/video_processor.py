@@ -6,6 +6,7 @@ import asyncio
 
 from app.models.detection import PlayerDetector
 from app.models.tracking import PlayerTracker
+from app.models.classification import PlayerClassifier
 from app.models.openscore import OpenScoreCalculator
 
 
@@ -16,6 +17,7 @@ class VideoProcessor:
         """Initialize video processor with models"""
         self.detector = PlayerDetector()
         self.tracker = PlayerTracker()
+        self.classifier = PlayerClassifier(num_teams=2)
         self.openscore_calc = None  # Will be initialized with video dimensions
         
     async def process(
@@ -75,6 +77,9 @@ class VideoProcessor:
                 
                 # Update tracker
                 tracked_detections = self.tracker.update(detections, frame_id)
+                
+                # Classify into teams
+                tracked_detections = self.classifier.classify(frame, tracked_detections)
                 
                 # Track unique players
                 for det in tracked_detections:
@@ -150,8 +155,11 @@ class VideoProcessor:
         frame_id: int
     ) -> np.ndarray:
         """Annotate frame with all visualizations"""
-        # Draw tracking
+        # Draw tracking with team info
         annotated = self.tracker.draw_tracks(frame, tracked_detections, show_trails=True)
+        
+        # Draw team assignments
+        annotated = self._draw_team_assignments(annotated, tracked_detections)
         
         # Draw openscores
         annotated = self.openscore_calc.draw_openscores(
@@ -187,18 +195,54 @@ class VideoProcessor:
         
         return annotated
     
+    def _draw_team_assignments(
+        self,
+        frame: np.ndarray,
+        tracked_detections: list
+    ) -> np.ndarray:
+        """Draw team information on frame"""
+        team_colors = {
+            0: (255, 0, 0),    # Team 0: Blue
+            1: (0, 0, 255)      # Team 1: Red
+        }
+        
+        for det in tracked_detections:
+            track_id = det['track_id']
+            bbox = det['bbox']
+            team_id = det.get('team_id', -1)
+            
+            if track_id >= 0 and team_id >= 0:
+                x1, y1, x2, y2 = [int(coord) for coord in bbox]
+                color = team_colors.get(team_id, (128, 128, 128))
+                
+                # Draw team label
+                team_label = f"Team {team_id}"
+                cv2.putText(
+                    frame,
+                    team_label,
+                    (x1, max(y1 - 30, 30)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    color,
+                    2
+                )
+        
+        return frame
+    
     def _calculate_openscore_summary(self, all_openscores: dict) -> dict:
         """Calculate summary statistics for openscores"""
         summary = {}
         
         for track_id, scores in all_openscores.items():
             if scores:
+                team_id = self.classifier.get_team_assignment(track_id)
                 summary[f"player_{track_id}"] = {
                     'avg_openscore': float(np.mean(scores)),
                     'max_openscore': float(np.max(scores)),
                     'min_openscore': float(np.min(scores)),
                     'std_openscore': float(np.std(scores)),
-                    'frames': len(scores)
+                    'frames': len(scores),
+                    'team_id': team_id
                 }
         
         return summary
