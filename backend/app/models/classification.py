@@ -26,6 +26,12 @@ class PlayerClassifier:
         self.team_colors_hsv = {}  # team_id -> (hue_mean, sat_mean, val_mean)
         self.team_colors_bgr = {}  # team_id -> (b, g, r) for visualization
         
+        # Fixed distinct visualization colors for teams
+        self.team_viz_colors = {
+            0: (255, 0, 0),      # Team 0: Bright Blue
+            1: (0, 0, 255)       # Team 1: Bright Red
+        }
+        
         # Store jersey colors for each player
         self.player_colors = {}  # track_id -> HSV color
         
@@ -55,11 +61,15 @@ class PlayerClassifier:
             
             # Add padding to focus on jersey (skip head/arms)
             h = y2 - y1
+            w = x2 - x1
             
-            crop_y1 = y1 + int(h * 0.1)  # Skip head
-            crop_y2 = y2 - int(h * 0.5)  # Skip feet
+            crop_y1 = y1 + int(h * 0.25)
+            crop_y2 = y1 + int(h * 0.6)
+
+            crop_x1 = x1 + int(w * 0.3)
+            crop_x2 = x1 + int(w * 0.7)
             
-            region = frame[crop_y1:crop_y2, x1:x2]
+            region = frame[crop_y1:crop_y2, crop_x1:crop_x2]
             
             if region.size == 0:
                 return None
@@ -126,11 +136,9 @@ class PlayerClassifier:
             track_id = det['track_id']
             
             if track_id in self.team_assignments:
-                det['team_id'] = self.team_assignments[track_id]
-                det['team_color'] = self.team_colors_bgr.get(
-                    self.team_assignments[track_id],
-                    (128, 128, 128)
-                )
+                team_id = self.team_assignments[track_id]
+                det['team_id'] = team_id
+                det['team_color'] = self.team_viz_colors.get(team_id, (128, 128, 128))
             else:
                 det['team_id'] = -1  # Unclassified
                 det['team_color'] = (128, 128, 128)
@@ -237,8 +245,8 @@ class PlayerClassifier:
         return self.team_assignments.copy()
     
     def get_team_color_bgr(self, team_id: int) -> Tuple[int, int, int]:
-        """Get BGR color for a team"""
-        return self.team_colors_bgr.get(team_id, (128, 128, 128))
+        """Get BGR visualization color for a team"""
+        return self.team_viz_colors.get(team_id, (128, 128, 128))
     
     def get_team_stats(self) -> Dict[int, int]:
         """Get count of players per team"""
