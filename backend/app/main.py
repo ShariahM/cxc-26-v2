@@ -217,7 +217,8 @@ async def download_video(task_id: str):
     return FileResponse(
         output_path,
         media_type="video/mp4",
-        filename=f"analyzed_{task['filename']}"
+        filename=f"analyzed_{task['filename']}",
+        content_disposition_type="inline"
     )
 
 

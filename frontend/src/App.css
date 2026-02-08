@@ -472,34 +472,27 @@ body {
   font-weight: bold;
 }
 
-.download-section {
-  text-align: center;
+.video-player-section {
   margin: 2rem 0;
 }
 
-.download-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 1rem 2rem;
+.video-player-section h3 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.video-player-card {
+  background: #111827;
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.analysis-video-player {
+  width: 100%;
+  max-height: 560px;
   border-radius: 8px;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 1.1rem;
-  transition: transform 0.2s;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.download-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-}
-
-.download-icon {
-  width: 24px;
-  height: 24px;
+  background: #000;
+  display: block;
 }
 
 .reset-section {
