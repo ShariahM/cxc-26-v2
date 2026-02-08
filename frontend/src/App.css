@@ -533,9 +533,259 @@ body {
   margin-bottom: 0.25rem;
 }
 
+.tooltip-score {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.tooltip-score-label {
+  font-weight: 400;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.tooltip-ai-explanation {
+  margin-top: 0.4rem;
+  color: #bfdbfe;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  padding-top: 0.4rem;
+}
+
 .tooltip-placeholder {
   margin-top: 0.4rem;
   color: var(--text-muted);
+}
+
+/* AI Summary & Analysis Blocks */
+.ai-summary-block {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  color: #e0e7ff;
+}
+
+.ai-summary-block p {
+  margin: 0;
+  line-height: 1.65;
+  font-size: 1.05rem;
+}
+
+.ai-badge {
+  display: inline-block;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  margin-bottom: 0.6rem;
+  letter-spacing: 0.02em;
+}
+
+.ai-badge-small {
+  display: inline-block;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  margin-bottom: 0.4rem;
+}
+
+.ai-detail-block {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  background: rgba(99, 102, 241, 0.08);
+  border-left: 3px solid #6366f1;
+  border-radius: 0 6px 6px 0;
+}
+
+.ai-detail-block p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #374151;
+}
+
+/* AI Play Reading Section */
+.ai-play-reading-section {
+  margin: 1.5rem 0;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-radius: 10px;
+  padding: 1.5rem;
+  color: #e2e8f0;
+}
+
+.ai-play-reading-section h3 {
+  color: #a5b4fc;
+  margin-bottom: 0.75rem;
+  font-size: 1.3rem;
+}
+
+.ai-play-reading-section p {
+  margin: 0;
+  line-height: 1.6;
+  font-size: 1rem;
+}
+
+/* OpenScore Breakdown Section */
+.openscore-breakdown-section {
+  margin: 2rem 0;
+}
+
+.openscore-breakdown-section h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.section-subtitle {
+  color: #6b7280;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.openscore-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.openscore-detail-card {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.openscore-detail-card:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.openscore-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.openscore-player-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.openscore-badge {
+  color: white;
+  font-weight: 700;
+  font-size: 1.1rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 20px;
+  min-width: 50px;
+  text-align: center;
+}
+
+.openscore-status-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.openscore-detail-stats {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.mini-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mini-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mini-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.openscore-context-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.75rem;
+  background: #f3f4f6;
+  border-radius: 8px;
+}
+
+.context-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #4b5563;
+}
+
+.context-icon {
+  font-size: 0.9rem;
+  width: 1.2rem;
+  text-align: center;
+}
+
+.openscore-ai-explanation {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
+  border-left: 3px solid #6366f1;
+  border-radius: 0 8px 8px 0;
+}
+
+.openscore-ai-explanation p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #374151;
+}
+
+/* Option card AI explanation */
+.option-ai-explanation {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.option-ai-explanation p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  opacity: 0.92;
+}
+
+.score-label {
+  font-size: 0.75rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* Video hint */
+.video-hint {
+  color: #6b7280;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  font-style: italic;
 }
 
 .reset-section {

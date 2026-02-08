@@ -68,6 +68,7 @@ class VideoProcessor:
         # Storage for analysis data
         frame_data = []
         all_openscores = {}
+        all_player_contexts = {}  # track_id -> list of per-frame context dicts
         players_detected_set = set()
         
         frame_id = 0
@@ -96,12 +97,18 @@ class VideoProcessor:
                     if track_id >= 0:
                         players_detected_set.add(track_id)
                 
-                # Calculate openscores
-                openscores = self.openscore_calc.calculate_frame_openscores(
+                # Calculate openscores with context for AI explanations
+                openscores, frame_contexts = self.openscore_calc.calculate_frame_openscores_with_context(
                     tracked_detections,
                     self.tracker,
                     fps
                 )
+                
+                # Aggregate per-player contexts (keep latest per player)
+                for track_id, ctx in frame_contexts.items():
+                    if track_id not in all_player_contexts:
+                        all_player_contexts[track_id] = []
+                    all_player_contexts[track_id].append(ctx)
                 
                 # Store frame data
                 frame_players = []
@@ -165,6 +172,9 @@ class VideoProcessor:
         openscore_summary = self._calculate_openscore_summary(all_openscores)
         tracking_summary = self.tracker.get_summary()
         
+        # Aggregate player contexts: average each metric across all frames
+        aggregated_contexts = self._aggregate_player_contexts(all_player_contexts)
+        
         return {
             'total_frames': frame_id,
             'fps': fps,
@@ -175,6 +185,7 @@ class VideoProcessor:
             'frame_data': frame_data,
             'openscore_summary': openscore_summary,
             'tracking_summary': tracking_summary,
+            'player_contexts': aggregated_contexts,
             'output_path': str(output_path)
         }
     
@@ -343,6 +354,24 @@ class VideoProcessor:
         
         return frame
     
+    def _aggregate_player_contexts(self, all_player_contexts: dict) -> dict:
+        """Aggregate per-frame context dicts into per-player averages."""
+        aggregated = {}
+        for track_id, ctx_list in all_player_contexts.items():
+            if not ctx_list:
+                continue
+            player_key = f"player_{track_id}"
+            # Average numeric fields across all frames
+            agg = {}
+            for key in ctx_list[0]:
+                values = [c[key] for c in ctx_list if isinstance(c.get(key), (int, float))]
+                if values:
+                    agg[key] = round(float(np.mean(values)), 2)
+                else:
+                    agg[key] = ctx_list[-1].get(key, 0)
+            aggregated[player_key] = agg
+        return aggregated
+
     def _calculate_openscore_summary(self, all_openscores: dict) -> dict:
         """Calculate summary statistics for openscores"""
         summary = {}
