@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 import asyncio
+import shutil
+import subprocess
 
 from app.models.detection import PlayerDetector
 from app.models.tracking import PlayerTracker
@@ -138,6 +140,9 @@ class VideoProcessor:
         finally:
             cap.release()
             out.release()
+
+        # Convert to a browser-safe codec (H.264) when ffmpeg is available.
+        self._ensure_web_playable_output(output_path)
         
         # Calculate summary statistics
         openscore_summary = self._calculate_openscore_summary(all_openscores)
@@ -342,3 +347,42 @@ class VideoProcessor:
                 }
         
         return summary
+
+    def _ensure_web_playable_output(self, output_path: Path) -> None:
+        """
+        Re-encode mp4v output to H.264 for reliable HTML5 video playback.
+        """
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            return
+
+        temp_path = output_path.with_name(f"{output_path.stem}_h264.mp4")
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(output_path),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(temp_path),
+        ]
+
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            temp_path.replace(output_path)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
