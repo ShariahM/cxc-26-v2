@@ -188,12 +188,6 @@ class VideoProcessor:
         """Annotate frame with all visualizations"""
         annotated = frame.copy()
         
-        # Draw team-colored bounding boxes and tracking trails
-        annotated = self._draw_team_assignments(annotated, tracked_detections)
-        
-        # Draw tracking trails
-        annotated = self._draw_tracking_trails(annotated, tracked_detections)
-        
         # Draw openscores
         annotated = self.openscore_calc.draw_openscores(
             annotated,
