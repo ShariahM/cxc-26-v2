@@ -313,6 +313,125 @@ class OpenScoreCalculator:
                 openscores[track_id] = adaptive_score
         
         return openscores
+
+    def calculate_frame_openscores_with_context(
+        self,
+        tracked_detections: List[Dict[str, Any]],
+        tracker,
+        fps: float = 30.0
+    ) -> Tuple[Dict[int, float], Dict[int, Dict[str, Any]]]:
+        """
+        Calculate openscores AND collect contextual data for each receiver.
+        
+        Returns:
+            Tuple of (openscores dict, contexts dict)
+            contexts maps track_id -> {nearest_defender_distance, num_nearby_defenders,
+                                        closing_speed, separation_efficiency, field_diagonal}
+        """
+        offense_players = [
+            d for d in tracked_detections
+            if d.get('side_role') == 'offense' and d.get('class_name') != 'ball'
+        ]
+        defense_players = [
+            d for d in tracked_detections
+            if d.get('side_role') == 'defense' and d.get('class_name') != 'ball'
+        ]
+
+        if not offense_players:
+            return {}, {}
+
+        if not defense_players:
+            defense_players = [
+                d for d in tracked_detections
+                if d.get('track_id', -1) >= 0
+                and d.get('class_name') != 'ball'
+                and d.get('side_role') != 'offense'
+            ]
+
+        openscores = {}
+        contexts = {}
+        field_diagonal = float(np.sqrt(self.field_width**2 + self.field_height**2))
+        coverage_radius = min(self.field_width, self.field_height) * 0.15
+
+        for player in offense_players:
+            track_id = player.get('track_id', -1)
+            if track_id < 0:
+                continue
+
+            raw_score = self.calculate_openscore(player, defense_players, tracker, fps)
+            adaptive_score = self._calculate_adaptive_score(track_id, raw_score)
+            openscores[track_id] = adaptive_score
+
+            # --- Collect context for this player ---
+            receiver_pos = player['center']
+
+            # Nearest defender distance
+            min_distance = float('inf')
+            nearby_count = 0
+            for defender in defense_players:
+                d_pos = defender['center']
+                dist = float(np.sqrt(
+                    (receiver_pos[0] - d_pos[0])**2 +
+                    (receiver_pos[1] - d_pos[1])**2
+                ))
+                min_distance = min(min_distance, dist)
+                if dist < coverage_radius:
+                    nearby_count += 1
+
+            if min_distance == float('inf'):
+                min_distance = 0.0
+
+            # Closing speed of nearest defender
+            closing_speed = 0.0
+            receiver_vel = tracker.calculate_velocity(track_id, fps)
+            for defender in defense_players:
+                d_track_id = defender.get('track_id', -1)
+                if d_track_id < 0:
+                    continue
+                d_pos = defender['center']
+                dist = float(np.sqrt(
+                    (receiver_pos[0] - d_pos[0])**2 +
+                    (receiver_pos[1] - d_pos[1])**2
+                ))
+                if abs(dist - min_distance) < 1.0:  # this is the nearest defender
+                    d_vel = tracker.calculate_velocity(d_track_id, fps)
+                    to_receiver = np.array([
+                        receiver_pos[0] - d_pos[0],
+                        receiver_pos[1] - d_pos[1]
+                    ])
+                    norm = np.linalg.norm(to_receiver)
+                    if norm > 0:
+                        direction = to_receiver / norm
+                        rel_vel = np.array([
+                            d_vel[0] - receiver_vel[0],
+                            d_vel[1] - receiver_vel[1]
+                        ])
+                        closing_speed = float(np.dot(rel_vel, direction))
+                    break
+
+            # Separation efficiency
+            history = tracker.get_track_history(track_id, window=15)
+            separation_eff = 0.5
+            if len(history) >= 5:
+                positions = np.array([h['center'] for h in history])
+                total_dist = sum(
+                    float(np.linalg.norm(positions[i] - positions[i-1]))
+                    for i in range(1, len(positions))
+                )
+                straight_dist = float(np.linalg.norm(positions[-1] - positions[0]))
+                if total_dist > 0:
+                    separation_eff = straight_dist / total_dist
+
+            contexts[track_id] = {
+                'nearest_defender_distance': round(min_distance, 1),
+                'num_nearby_defenders': nearby_count,
+                'closing_speed': round(closing_speed, 1),
+                'separation_efficiency': round(separation_eff, 3),
+                'coverage_radius_used': round(coverage_radius, 1),
+                'field_diagonal': round(field_diagonal, 1),
+            }
+
+        return openscores, contexts
     
     def get_best_option(
         self,

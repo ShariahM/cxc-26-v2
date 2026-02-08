@@ -155,7 +155,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Powered by YOLOv8, FastAPI, and React | ByteTrack Player Tracking</p>
+        <p>Powered by YOLOv8, FastAPI, React & Gemini AI | ByteTrack Player Tracking | BackBoard.IO</p>
       </footer>
     </div>
   );

@@ -3,6 +3,7 @@ import { getDownloadUrl } from '../services/api';
 
 const AnalysisResults = ({ results, taskId }) => {
   if (!results || !results.results) {
+    console.log("no ai results found")
     return null;
   }
 
@@ -16,6 +17,14 @@ const AnalysisResults = ({ results, taskId }) => {
   const [activePlayers, setActivePlayers] = useState([]);
   const [hoveredPlayer, setHoveredPlayer] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+  // AI-enhanced data from Gemini
+  const aiOpenscoreExplanations = feedback.ai_openscore_explanations || {};
+  const playerContexts = feedback.player_contexts || {};
+  const aiSummary = feedback.ai_summary || '';
+  const aiStrengthsAnalysis = feedback.ai_strengths_analysis || '';
+  const aiImprovementAnalysis = feedback.ai_improvement_analysis || '';
+  const aiPlayReading = feedback.ai_play_reading || '';
 
   const framePlayerMap = useMemo(() => {
     const map = new Map();
@@ -74,144 +83,58 @@ const AnalysisResults = ({ results, taskId }) => {
     }
   };
 
+  const getScoreColor = (score) => {
+    if (score >= 70) return '#22c55e';
+    if (score >= 50) return '#eab308';
+    if (score >= 30) return '#f97316';
+    return '#ef4444';
+  };
+
+  const getScoreLabel = (score) => {
+    if (score >= 80) return 'Wide Open';
+    if (score >= 60) return 'Open';
+    if (score >= 40) return 'Contested';
+    if (score >= 20) return 'Covered';
+    return 'Locked Down';
+  };
+
+  // Get AI explanation for a player's tooltip
+  const getPlayerTooltipExplanation = (player) => {
+    const playerId = `player_${player.track_id}`;
+    const aiExplanation = aiOpenscoreExplanations[playerId];
+    if (aiExplanation) return aiExplanation;
+
+    // Fallback: build from context data
+    const ctx = playerContexts[playerId];
+    if (ctx) {
+      const pxPerYard = 1920 / 53.3;
+      const yards = (ctx.nearest_defender_distance / pxPerYard).toFixed(1);
+      const nearby = ctx.num_nearby_defenders;
+      const closing = ctx.closing_speed;
+
+      let explanation = `Nearest defender: ~${yards} yds. `;
+      if (nearby === 0) explanation += 'No defenders in coverage zone. ';
+      else if (nearby === 1) explanation += '1 defender nearby. ';
+      else explanation += `${nearby} defenders converging. `;
+
+      if (closing > 100) explanation += 'Defender closing fast.';
+      else if (closing < -50) explanation += 'Defender moving away.';
+      else explanation += 'Defender holding position.';
+
+      return explanation;
+    }
+
+    return null;
+  };
+
   return (
     <div className="analysis-results">
-      <h2>Analysis Complete</h2>
+      <h2>🏈 Analysis Complete</h2>
 
-      {/* Overall Grade */}
-      <div className="grade-section">
-        <div className="grade-card" style={{ borderColor: getGradeColor(feedback.overall_grade) }}>
-          <div className="grade-label">Overall Grade</div>
-          <div className="grade-value" style={{ color: getGradeColor(feedback.overall_grade) }}>
-            {feedback.overall_grade}
-          </div>
-          <div className="grade-score">Score: {feedback.overall_score}/100</div>
-        </div>
-        <div className="grade-summary">
-          <p>{feedback.summary}</p>
-        </div>
-      </div>
-
-      {/* Statistics */}
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Receivers Tracked</div>
-          <div className="stat-value">{feedback.statistics.total_receivers_tracked}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Avg OpenScore</div>
-          <div className="stat-value">{feedback.statistics.avg_openscore_all_receivers.toFixed(1)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Players Detected</div>
-          <div className="stat-value">{feedback.statistics.total_players_detected}</div>
-        </div>
-      </div>
-
-      {/* Strengths and Improvements */}
-      <div className="feedback-grid">
-        {feedback.strengths.length > 0 && (
-          <div className="feedback-section strengths">
-            <h3>💪 Strengths</h3>
-            <ul>
-              {feedback.strengths.map((strength, idx) => (
-                <li key={idx}>{strength}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {feedback.areas_for_improvement.length > 0 && (
-          <div className="feedback-section improvements">
-            <h3>📈 Areas for Improvement</h3>
-            <ul>
-              {feedback.areas_for_improvement.map((area, idx) => (
-                <li key={idx}>{area}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {/* Recommendations */}
-      {feedback.recommendations.length > 0 && (
-        <div className="recommendations-section">
-          <h3>💡 Recommendations</h3>
-          <ul className="recommendations-list">
-            {feedback.recommendations.map((rec, idx) => (
-              <li key={idx}>{rec}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Best Options */}
-      {feedback.best_options.length > 0 && (
-        <div className="best-options-section">
-          <h3>🎯 Best Passing Options</h3>
-          <div className="options-grid">
-            {feedback.best_options.map((option, idx) => (
-              <div key={idx} className="option-card">
-                <div className="option-rank">#{idx + 1}</div>
-                <div className="option-receiver">{option.receiver}</div>
-                <div className="option-stats">
-                  <div className="option-stat">
-                    <span className="label">Avg OpenScore:</span>
-                    <span className="value">{option.avg_openscore}</span>
-                  </div>
-                  <div className="option-stat">
-                    <span className="label">Max OpenScore:</span>
-                    <span className="value">{option.max_openscore}</span>
-                  </div>
-                  <div className="option-stat">
-                    <span className="label">Consistency:</span>
-                    <span className="value">{option.consistency}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Missed Opportunities */}
-      {feedback.missed_opportunities.length > 0 && (
-        <div className="missed-section">
-          <h3>⚠️ Missed Opportunities</h3>
-          <div className="missed-list">
-            {feedback.missed_opportunities.map((missed, idx) => (
-              <div key={idx} className="missed-card">
-                <div className="missed-receiver">{missed.receiver}</div>
-                <div className="missed-stats">
-                  <span>Peak: {missed.peak_openscore}</span>
-                  <span>Avg: {missed.avg_openscore}</span>
-                </div>
-                <div className="missed-note">{missed.note}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Key Moments */}
-      {feedback.key_moments.length > 0 && (
-        <div className="key-moments-section">
-          <h3>⭐ Key Moments</h3>
-          <div className="moments-list">
-            {feedback.key_moments.map((moment, idx) => (
-              <div key={idx} className="moment-card">
-                <div className="moment-frame">Frame {moment.frame}</div>
-                <div className="moment-description">{moment.description}</div>
-                <div className="moment-score">OpenScore: {moment.openscore}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Annotated Video Player */}
+      {/* Annotated Video Player - Moved to Top */}
       <div className="video-player-section">
         <h3>🎬 Annotated Video</h3>
+        <p className="video-hint">Pause the video and hover over players to see AI-powered OpenScore analysis.</p>
         <div className="video-player-card">
           <div
             className="video-overlay-container"
@@ -241,14 +164,47 @@ const AnalysisResults = ({ results, taskId }) => {
                   top: `${tooltipPos.y + 12}px`,
                 }}
               >
-                <div className="tooltip-title">Receiver #{hoveredPlayer.track_id}</div>
-                <div>OpenScore: {Number(hoveredPlayer.openscore || 0).toFixed(1)}</div>
-                <div className="tooltip-placeholder">
-                  AI placeholder: Add LLM explanation here for route, leverage, and passing risk.
+                <div className="tooltip-title">Receiver</div>
+                <div className="tooltip-score" style={{ color: getScoreColor(hoveredPlayer.openscore || 0) }}>
+                  OpenScore: {Number(hoveredPlayer.openscore || 0).toFixed(1)}
+                  <span className="tooltip-score-label"> ({getScoreLabel(hoveredPlayer.openscore || 0)})</span>
                 </div>
+                {(() => {
+                  const explanation = getPlayerTooltipExplanation(hoveredPlayer);
+                  if (explanation) {
+                    return (
+                      <div className="tooltip-ai-explanation">
+                        {explanation}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Overall Grade */}
+      <div className="grade-section">
+        <div className="grade-card" style={{ borderColor: getGradeColor(feedback.overall_grade) }}>
+          <div className="grade-label">Overall Grade</div>
+          <div className="grade-value" style={{ color: getGradeColor(feedback.overall_grade) }}>
+            {feedback.overall_grade}
+          </div>
+          <div className="grade-score">Score: {feedback.overall_score}/100</div>
+        </div>
+        <div className="grade-summary">
+          {/* Show AI-enhanced summary if available, otherwise fall back to original */}
+          {aiSummary ? (
+            <div className="ai-summary-block">
+              <div className="ai-badge">🤖 AI Analysis</div>
+              <p>{aiSummary.replace(/Receiver #\d+/g, 'receiver')}</p>
+            </div>
+          ) : (
+            <p>{feedback.summary}</p>
+          )}
         </div>
       </div>
     </div>

@@ -8,9 +8,14 @@ from pathlib import Path
 from typing import Dict, Optional
 import asyncio
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
 
 from app.services.video_processor import VideoProcessor
 from app.services.feedback_generator import FeedbackGenerator
+from app.services.gemini_service import gemini_service
 
 app = FastAPI(
     title="NFL Video Analysis API",
@@ -123,6 +128,44 @@ async def process_video(task_id: str, video_path: Path):
         tasks[task_id]["message"] = "Generating feedback..."
         feedback = feedback_generator.generate(results)
         
+        openscore_summary = results.get("openscore_summary", {})
+        player_contexts = results.get("player_contexts", {})
+
+        # --- Gemini AI-enhanced analysis ---
+        tasks[task_id]["message"] = "Generating AI-powered analysis with Gemini..."
+
+        # 1. Generate detailed per-player OpenScore explanations
+        ai_openscore_explanations = {}
+        try:
+            ai_openscore_explanations = await gemini_service.explain_all_openscores(
+                openscore_summary, player_contexts
+            )
+        except Exception as e:
+            print(f"[process_video] Gemini openscore explanations failed: {e}")
+
+        # 2. Generate detailed QB performance summary
+        ai_qb_analysis = {}
+        try:
+            ai_qb_analysis = await gemini_service.explain_qb_performance(
+                feedback, openscore_summary
+            )
+            print(ai_qb_analysis)
+        except Exception as e:
+            print(f"[process_video] Gemini QB analysis failed: {e}")
+
+        # Merge AI analysis into feedback
+        if ai_qb_analysis.get("summary"):
+            feedback["ai_summary"] = ai_qb_analysis["summary"]
+        if ai_qb_analysis.get("strengths_analysis"):
+            feedback["ai_strengths_analysis"] = ai_qb_analysis["strengths_analysis"]
+        if ai_qb_analysis.get("improvement_analysis"):
+            feedback["ai_improvement_analysis"] = ai_qb_analysis["improvement_analysis"]
+        if ai_qb_analysis.get("play_reading"):
+            feedback["ai_play_reading"] = ai_qb_analysis["play_reading"]
+
+        feedback["ai_openscore_explanations"] = ai_openscore_explanations
+        feedback["player_contexts"] = player_contexts
+
         # Save output video path
         output_path = OUTPUT_DIR / f"{task_id}_annotated.mp4"
         
