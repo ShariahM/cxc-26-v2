@@ -74,12 +74,12 @@ const AnalysisResults = ({ results, taskId }) => {
 
   const getGradeColor = (grade) => {
     switch (grade) {
-      case 'A': return '#22c55e';
-      case 'B': return '#3b82f6';
-      case 'C': return '#eab308';
-      case 'D': return '#f97316';
-      case 'F': return '#ef4444';
-      default: return '#6b7280';
+      case 'A': return '#f2f2f2';
+      case 'B': return '#d6d6d6';
+      case 'C': return '#b8b8b8';
+      case 'D': return '#9a9a9a';
+      case 'F': return '#7f7f7f';
+      default: return '#9a9a9a';
     }
   };
 
