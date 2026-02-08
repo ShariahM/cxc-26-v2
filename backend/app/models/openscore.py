@@ -24,6 +24,9 @@ class OpenScoreCalculator:
             'separation': 0.25,   # Weight for route separation
             'coverage': 0.1       # Weight for coverage scheme
         }
+        # Per-player recent raw score history for adaptive scoring.
+        self.player_score_history = defaultdict(list)
+        self.history_window = 20
     
     def calculate_openscore(
         self,
@@ -45,7 +48,10 @@ class OpenScoreCalculator:
             OpenScore value (0-100, higher is more open)
         """
         if not defenders_data:
-            return 100.0  # No defenders = completely open
+            # If defenders are missing, avoid hard-coding 100.
+            # Fall back to receiver movement/separation with a bounded range.
+            separation_score = self._calculate_separation_score(receiver_data, tracker)
+            return float(np.clip(35.0 + 0.5 * separation_score, 0, 85))
         
         # Component scores
         distance_score = self._calculate_distance_score(receiver_data, defenders_data, tracker)
@@ -62,6 +68,29 @@ class OpenScoreCalculator:
         )
         
         return float(np.clip(openscore, 0, 100))
+
+    def _calculate_adaptive_score(self, track_id: int, raw_score: float) -> float:
+        """
+        Adapt score to player's recent context.
+        Returns a blended score where recent baseline and volatility are considered.
+        """
+        history = self.player_score_history[track_id]
+
+        if len(history) < 5:
+            adaptive = raw_score
+        else:
+            baseline = float(np.mean(history))
+            spread = max(float(np.std(history)), 5.0)
+            # 50-centered relative score from player's trend.
+            relative = 50.0 + 15.0 * ((raw_score - baseline) / spread)
+            relative = float(np.clip(relative, 0, 100))
+            adaptive = 0.65 * raw_score + 0.35 * relative
+
+        history.append(float(raw_score))
+        if len(history) > self.history_window:
+            history.pop(0)
+
+        return float(np.clip(adaptive, 0, 100))
     
     def _calculate_distance_score(
         self,
@@ -251,17 +280,37 @@ class OpenScoreCalculator:
         Returns:
             Dictionary mapping receiver track_id to openscore
         """
-        # Separate receivers and defenders
-        receivers = [d for d in tracked_detections if d['class_name'] in ['receiver', 'player']]
-        defenders = [d for d in tracked_detections if d['class_name'] == 'defender']
+        # Score ONLY offense players (never defenders).
+        offense_players = [
+            d for d in tracked_detections
+            if d.get('side_role') == 'offense' and d.get('class_name') != 'ball'
+        ]
+        defense_players = [
+            d for d in tracked_detections
+            if d.get('side_role') == 'defense' and d.get('class_name') != 'ball'
+        ]
+
+        # If offense side-role mapping is not ready yet, skip scoring this frame.
+        if not offense_players:
+            return {}
+
+        # Defensive fallback: all non-offense tracked players (except ball).
+        if not defense_players:
+            defense_players = [
+                d for d in tracked_detections
+                if d.get('track_id', -1) >= 0
+                and d.get('class_name') != 'ball'
+                and d.get('side_role') != 'offense'
+            ]
         
         openscores = {}
         
-        for receiver in receivers:
-            track_id = receiver.get('track_id', -1)
+        for player in offense_players:
+            track_id = player.get('track_id', -1)
             if track_id >= 0:
-                score = self.calculate_openscore(receiver, defenders, tracker, fps)
-                openscores[track_id] = score
+                raw_score = self.calculate_openscore(player, defense_players, tracker, fps)
+                adaptive_score = self._calculate_adaptive_score(track_id, raw_score)
+                openscores[track_id] = adaptive_score
         
         return openscores
     
@@ -315,7 +364,7 @@ class OpenScoreCalculator:
         annotated_frame = frame.copy()
         
         for det in tracked_detections:
-            if det['class_name'] not in ['receiver', 'player']:
+            if det.get('side_role') != 'offense':
                 continue
             
             track_id = det.get('track_id', -1)
@@ -335,7 +384,7 @@ class OpenScoreCalculator:
                 color = (0, 0, 255)  # Red
             
             # Draw openscore label
-            label = f"Open: {score:.1f}"
+            label = f"Adaptive Open: {score:.1f}"
             (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             
             cv2.rectangle(

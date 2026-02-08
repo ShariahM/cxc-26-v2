@@ -17,8 +17,9 @@ class VideoProcessor:
         """Initialize video processor with models"""
         self.detector = PlayerDetector()
         self.tracker = PlayerTracker()
-        self.classifier = PlayerClassifier(num_teams=2)
+        self.classifier = PlayerClassifier(num_teams=2, warmup_frames=10)
         self.openscore_calc = None  # Will be initialized with video dimensions
+        self.team_role_by_team_id: Dict[int, str] = {}
         
     async def process(
         self,
@@ -37,6 +38,10 @@ class VideoProcessor:
         Returns:
             Dictionary with processing results
         """
+        # Reset per-video state
+        self.classifier.reset()
+        self.team_role_by_team_id = {}
+
         # Open video
         cap = cv2.VideoCapture(video_path)
         
@@ -80,6 +85,8 @@ class VideoProcessor:
                 
                 # Classify into teams
                 tracked_detections = self.classifier.classify(frame, tracked_detections)
+                self._initialize_side_roles(tracked_detections)
+                self._apply_side_roles(tracked_detections)
                 
                 # Track unique players
                 for det in tracked_detections:
@@ -215,8 +222,12 @@ class VideoProcessor:
                 # Draw bounding box with team color (thicker for visibility)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), team_color, 3)
                 
-                # Draw track ID with team color background
-                track_label = f"ID: {track_id}"
+                # Draw role + ID with team color background
+                side_role = det.get('side_role')
+                if side_role:
+                    track_label = f"{side_role.upper()} | ID: {track_id}"
+                else:
+                    track_label = f"ID: {track_id}"
                 text_size = cv2.getTextSize(track_label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
                 text_x, text_y = x1, max(y1 - 5, 20)
                 
@@ -241,6 +252,54 @@ class VideoProcessor:
                 )
         
         return frame
+
+    def _initialize_side_roles(self, tracked_detections: list) -> None:
+        """
+        Lock mapping once at initial formation:
+        right-side team -> offense, left-side team -> defense.
+        """
+        if self.team_role_by_team_id:
+            return
+
+        team_x_positions: Dict[int, list] = {}
+        for det in tracked_detections:
+            team_id = det.get('team_id', -1)
+            track_id = det.get('track_id', -1)
+            class_name = det.get('class_name', '')
+            if team_id < 0 or track_id < 0 or class_name == 'ball':
+                continue
+            team_x_positions.setdefault(team_id, []).append(det['center'][0])
+
+        if len(team_x_positions) < 2:
+            return
+
+        team_avg_x = {tid: float(np.mean(xs)) for tid, xs in team_x_positions.items() if xs}
+        if len(team_avg_x) < 2:
+            return
+
+        right_team_id = max(team_avg_x, key=team_avg_x.get)
+        left_team_id = min(team_avg_x, key=team_avg_x.get)
+
+        self.team_role_by_team_id[right_team_id] = 'offense'
+        self.team_role_by_team_id[left_team_id] = 'defense'
+
+    def _apply_side_roles(self, tracked_detections: list) -> None:
+        """Apply locked side-role labels and colors to detections."""
+        if not self.team_role_by_team_id:
+            return
+
+        for det in tracked_detections:
+            team_id = det.get('team_id', -1)
+            if team_id not in self.team_role_by_team_id:
+                continue
+
+            role = self.team_role_by_team_id[team_id]
+            det['side_role'] = role
+
+            if role == 'offense':
+                det['team_color'] = (0, 0, 255)  # red
+            elif role == 'defense':
+                det['team_color'] = (255, 0, 0)  # blue
     
     def _draw_tracking_trails(
         self,

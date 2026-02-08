@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 import supervision as sv
 
@@ -220,7 +220,8 @@ class PlayerTracker:
         self,
         frame: np.ndarray,
         tracked_detections: List[Dict[str, Any]],
-        show_trails: bool = True
+        show_trails: bool = True,
+        team_roles: Optional[Dict[int, str]] = None
     ) -> np.ndarray:
         """
         Draw tracking visualization on frame
@@ -241,24 +242,33 @@ class PlayerTracker:
             track_id = det['track_id']
             bbox = det['bbox']
             class_name = det['class_name']
+            role = team_roles.get(track_id) if team_roles else None
             
             # Draw bounding box with track ID
             x1, y1, x2, y2 = [int(coord) for coord in bbox]
             
-            # Color based on class
-            colors = {
-                'quarterback': (255, 0, 0),  # Blue
-                'receiver': (0, 255, 255),   # Yellow
-                'defender': (0, 0, 255),     # Red
-                'player': (0, 255, 0),       # Green
-                'ball': (255, 255, 255)      # White
-            }
-            color = colors.get(class_name, (128, 128, 128))
+            # Team role colors take priority over class colors.
+            if role == 'offense':
+                color = (0, 0, 255)  # Red
+            elif role == 'defense':
+                color = (255, 0, 0)  # Blue
+            else:
+                colors = {
+                    'quarterback': (255, 0, 0),  # Blue
+                    'receiver': (0, 255, 255),   # Yellow
+                    'defender': (0, 0, 255),     # Red
+                    'player': (0, 255, 0),       # Green
+                    'ball': (255, 255, 255)      # White
+                }
+                color = colors.get(class_name, (128, 128, 128))
             
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
             
-            # Draw track ID
-            label = f"ID: {track_id}"
+            # Draw role + track ID
+            if role:
+                label = f"{role.upper()} | ID: {track_id}"
+            else:
+                label = f"ID: {track_id}"
             cv2.putText(
                 annotated_frame,
                 label,
