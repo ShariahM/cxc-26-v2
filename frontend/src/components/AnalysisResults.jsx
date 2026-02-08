@@ -233,24 +233,6 @@ const AnalysisResults = ({ results, taskId }) => {
           >
             Your browser does not support the video tag.
           </video>
-            {videoRef.current?.paused && activePlayers.map((player) => {
-              const [x1, y1, x2, y2] = player.bbox;
-              const width = sourceWidth || videoRef.current?.videoWidth || 1;
-              const height = sourceHeight || videoRef.current?.videoHeight || 1;
-
-              return (
-                <div
-                  key={player.track_id}
-                  className="player-hover-box"
-                  style={{
-                    left: `${(x1 / width) * 100}%`,
-                    top: `${(y1 / height) * 100}%`,
-                    width: `${((x2 - x1) / width) * 100}%`,
-                    height: `${((y2 - y1) / height) * 100}%`,
-                  }}
-                />
-              );
-            })}
             {hoveredPlayer && (
               <div
                 className="player-tooltip"

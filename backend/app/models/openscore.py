@@ -383,21 +383,24 @@ class OpenScoreCalculator:
             else:
                 color = (0, 0, 255)  # Red
             
-            # Draw openscore label
+            # Draw openscore label above the player's head.
             label = f"Adaptive Open: {score:.1f}"
             (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            center_x = int((x1 + x2) / 2)
+            text_x = max(0, center_x - (w // 2))
+            text_y = max(h + 8, y1 - 8)
             
             cv2.rectangle(
                 annotated_frame,
-                (x2 - w - 10, y1),
-                (x2, y1 + h + 10),
+                (text_x - 5, text_y - h - 5),
+                (text_x + w + 5, text_y + 5),
                 color,
                 -1
             )
             cv2.putText(
                 annotated_frame,
                 label,
-                (x2 - w - 5, y1 + h + 5),
+                (text_x, text_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (0, 0, 0),
