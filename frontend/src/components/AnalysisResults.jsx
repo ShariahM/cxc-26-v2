@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { getDownloadUrl } from '../services/api';
 
 const AnalysisResults = ({ results, taskId }) => {
@@ -7,6 +7,61 @@ const AnalysisResults = ({ results, taskId }) => {
   }
 
   const { feedback, openscore_data, tracking_data } = results.results;
+  const fps = results.results.fps || 30;
+  const frameData = results.results.frame_data || [];
+  const sourceWidth = results.results.video_width || 0;
+  const sourceHeight = results.results.video_height || 0;
+  const videoRef = useRef(null);
+  const overlayRef = useRef(null);
+  const [activePlayers, setActivePlayers] = useState([]);
+  const [hoveredPlayer, setHoveredPlayer] = useState(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+
+  const framePlayerMap = useMemo(() => {
+    const map = new Map();
+    frameData.forEach((frame) => {
+      map.set(frame.frame_id, frame.players || []);
+    });
+    return map;
+  }, [frameData]);
+
+  const updateActivePlayersForCurrentTime = () => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    const frameId = Math.max(0, Math.floor(videoEl.currentTime * fps));
+    setActivePlayers(framePlayerMap.get(frameId) || []);
+  };
+
+  const handleOverlayMouseMove = (event) => {
+    const videoEl = videoRef.current;
+    const overlayEl = overlayRef.current;
+    if (!videoEl || !overlayEl || !videoEl.paused) {
+      setHoveredPlayer(null);
+      return;
+    }
+
+    const rect = overlayEl.getBoundingClientRect();
+    const relX = event.clientX - rect.left;
+    const relY = event.clientY - rect.top;
+
+    const nativeWidth = sourceWidth || videoEl.videoWidth || 1;
+    const nativeHeight = sourceHeight || videoEl.videoHeight || 1;
+    const px = (relX / rect.width) * nativeWidth;
+    const py = (relY / rect.height) * nativeHeight;
+
+    const hitPlayer = activePlayers.find((player) => {
+      const [x1, y1, x2, y2] = player.bbox;
+      return px >= x1 && px <= x2 && py >= y1 && py <= y2;
+    });
+
+    if (!hitPlayer) {
+      setHoveredPlayer(null);
+      return;
+    }
+
+    setHoveredPlayer(hitPlayer);
+    setTooltipPos({ x: relX, y: relY });
+  };
 
   const getGradeColor = (grade) => {
     switch (grade) {
@@ -158,14 +213,60 @@ const AnalysisResults = ({ results, taskId }) => {
       <div className="video-player-section">
         <h3>🎬 Annotated Video</h3>
         <div className="video-player-card">
+          <div
+            className="video-overlay-container"
+            ref={overlayRef}
+            onMouseMove={handleOverlayMouseMove}
+            onMouseLeave={() => setHoveredPlayer(null)}
+          >
           <video
             className="analysis-video-player"
             src={getDownloadUrl(taskId)}
             controls
             preload="metadata"
+            ref={videoRef}
+            onLoadedMetadata={updateActivePlayersForCurrentTime}
+            onTimeUpdate={updateActivePlayersForCurrentTime}
+            onSeeked={updateActivePlayersForCurrentTime}
+            onPause={updateActivePlayersForCurrentTime}
+            onPlay={() => setHoveredPlayer(null)}
           >
             Your browser does not support the video tag.
           </video>
+            {videoRef.current?.paused && activePlayers.map((player) => {
+              const [x1, y1, x2, y2] = player.bbox;
+              const width = sourceWidth || videoRef.current?.videoWidth || 1;
+              const height = sourceHeight || videoRef.current?.videoHeight || 1;
+
+              return (
+                <div
+                  key={player.track_id}
+                  className="player-hover-box"
+                  style={{
+                    left: `${(x1 / width) * 100}%`,
+                    top: `${(y1 / height) * 100}%`,
+                    width: `${((x2 - x1) / width) * 100}%`,
+                    height: `${((y2 - y1) / height) * 100}%`,
+                  }}
+                />
+              );
+            })}
+            {hoveredPlayer && (
+              <div
+                className="player-tooltip"
+                style={{
+                  left: `${tooltipPos.x + 12}px`,
+                  top: `${tooltipPos.y + 12}px`,
+                }}
+              >
+                <div className="tooltip-title">Receiver #{hoveredPlayer.track_id}</div>
+                <div>OpenScore: {Number(hoveredPlayer.openscore || 0).toFixed(1)}</div>
+                <div className="tooltip-placeholder">
+                  AI placeholder: Add LLM explanation here for route, leverage, and passing risk.
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
