@@ -104,10 +104,27 @@ class VideoProcessor:
                 )
                 
                 # Store frame data
+                frame_players = []
+                for det in tracked_detections:
+                    if det.get('side_role') != 'offense':
+                        continue
+                    if det.get('class_name') not in ['receiver', 'player']:
+                        continue
+
+                    track_id = det.get('track_id', -1)
+                    frame_players.append({
+                        'track_id': track_id,
+                        'class_name': det.get('class_name'),
+                        'side_role': det.get('side_role'),
+                        'bbox': [float(v) for v in det.get('bbox', [0, 0, 0, 0])],
+                        'openscore': float(openscores.get(track_id, 0.0))
+                    })
+
                 frame_data.append({
                     'frame_id': frame_id,
                     'detections': len(tracked_detections),
-                    'openscores': openscores
+                    'openscores': openscores,
+                    'players': frame_players
                 })
                 
                 # Aggregate all openscores
@@ -152,6 +169,8 @@ class VideoProcessor:
             'total_frames': frame_id,
             'fps': fps,
             'duration': duration,
+            'video_width': width,
+            'video_height': height,
             'players_detected': len(players_detected_set),
             'frame_data': frame_data,
             'openscore_summary': openscore_summary,
