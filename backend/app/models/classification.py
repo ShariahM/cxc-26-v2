@@ -1,266 +1,238 @@
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
 from sklearn.cluster import KMeans
-from collections import defaultdict
+from collections import defaultdict, Counter
 import cv2
 
 
 class PlayerClassifier:
-    """Classify players into teams based on jersey colors with persistent team IDs"""
+    """Classify players into teams based on jersey colors with persistent team IDs.
     
-    def __init__(self, num_teams: int = 2, color_samples_per_player: int = 20):
-        """
-        Initialize team classifier
-        
-        Args:
-            num_teams: Number of teams (default 2)
-            color_samples_per_player: Number of frames to sample colors before assignment
-        """
+    Uses LAB color space for perceptually uniform distance, filters out grass/skin,
+    and uses majority voting over multiple frames for robust assignment.
+    Bounding boxes and trails are colored: Team 0 = Blue, Team 1 = Red.
+    """
+    
+    def __init__(self, num_teams: int = 2, warmup_frames: int = 30):
         self.num_teams = num_teams
-        self.color_samples_per_player = color_samples_per_player
+        self.warmup_frames = warmup_frames  # frames to collect before first clustering
         
-        # Store persistent team assignments by track_id
-        self.team_assignments = {}  # track_id -> team_id (0 or 1)
+        # Persistent team assignments: track_id -> team_id (0 or 1)
+        self.team_assignments: Dict[int, int] = {}
         
-        # Store team colors (HSV) and BGR for visualization
-        self.team_colors_hsv = {}  # team_id -> (hue_mean, sat_mean, val_mean)
-        self.team_colors_bgr = {}  # team_id -> (b, g, r) for visualization
+        # Team cluster centres in LAB space (set after first clustering)
+        self.team_centers_lab: Optional[np.ndarray] = None  # shape (num_teams, 3)
         
-        # Fixed distinct visualization colors for teams
+        # Visualization colours (BGR)
         self.team_viz_colors = {
-            0: (255, 0, 0),      # Team 0: Bright Blue
-            1: (0, 0, 255)       # Team 1: Bright Red
+            0: (255, 0, 0),    # Team 0: Blue
+            1: (0, 0, 255),    # Team 1: Red
         }
         
-        # Store jersey colors for each player
-        self.player_colors = {}  # track_id -> HSV color
+        # Per-player colour history: track_id -> list of LAB colours (one per frame)
+        self._color_history: Dict[int, List[np.ndarray]] = defaultdict(list)
         
-        # Collect color samples for clustering
-        self.color_samples = defaultdict(list)  # track_id -> list of HSV colors
+        # How many colour samples we need before we lock a player's team
+        self._min_votes = 5
         
-        # Track when teams are determined
-        self.teams_determined = False
-    
-    def extract_jersey_color(
-        self,
-        frame: np.ndarray,
-        bbox: List[float]
-    ) -> Optional[np.ndarray]:
-        """
-        Extract dominant jersey color from bounding box region
-        
-        Args:
-            frame: Input frame (BGR)
-            bbox: [x1, y1, x2, y2] bounding box
-            
-        Returns:
-            HSV color as [hue, saturation, value] or None if extraction fails
-        """
-        try:
-            x1, y1, x2, y2 = [int(coord) for coord in bbox]
-            
-            # Add padding to focus on jersey (skip head/arms)
-            h = y2 - y1
-            w = x2 - x1
-            
-            crop_y1 = y1 + int(h * 0.25)
-            crop_y2 = y1 + int(h * 0.6)
+        # Frame counter
+        self._frame_count = 0
+        self._teams_ready = False
 
-            crop_x1 = x1 + int(w * 0.3)
-            crop_x2 = x1 + int(w * 0.7)
-            
-            region = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-            
-            if region.size == 0:
-                return None
-            
-            # Convert to HSV
-            hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-            
-            # Calculate mean color (ignoring very dark pixels)
-            mask = hsv[:, :, 2] > 30  # Value > 30
-            valid_pixels = hsv[mask]
-            
-            if len(valid_pixels) == 0:
-                return None
-            
-            mean_color = valid_pixels.mean(axis=0)
-            return mean_color.astype(np.uint8)
-        
-        except Exception as e:
-            return None
-    
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def classify(
         self,
         frame: np.ndarray,
-        tracked_detections: List[Dict[str, Any]]
+        tracked_detections: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """
-        Classify players into teams based on jersey colors
-        
-        Args:
-            frame: Input frame
-            tracked_detections: List of tracked detections with track_ids
-            
-        Returns:
-            Detections with added 'team_id' and 'team_color' fields
-        """
-        # Collect color samples and classify
+        """Add 'team_id' and 'team_color' to each detection."""
+        self._frame_count += 1
+
+        # 1. Extract jersey colour for every player in this frame
+        colors_this_frame: Dict[int, np.ndarray] = {}
         for det in tracked_detections:
-            track_id = det['track_id']
-            
-            if track_id < 0:  # Skip untracked detections
+            tid = det['track_id']
+            if tid < 0:
                 continue
-            
-            color = self.extract_jersey_color(frame, det['bbox'])
-            
-            if color is not None:
-                self.player_colors[track_id] = color
-                
-                # If not yet assigned
-                if track_id not in self.team_assignments:
-                    if not self.teams_determined:
-                        # Collect samples until teams are determined
-                        self.color_samples[track_id].append(color)
-                    else:
-                        # Classify immediately based on team colors
-                        team_id = self._classify_to_nearest_team(color)
-                        self.team_assignments[track_id] = team_id
-        
-        # Try to determine teams once we have enough samples
-        if not self.teams_determined and len(self.color_samples) >= self.num_teams:
-            self._determine_teams()
-        
-        # Assign team IDs to detections
+            lab = self._extract_jersey_lab(frame, det['bbox'])
+            if lab is not None:
+                self._color_history[tid].append(lab)
+                colors_this_frame[tid] = lab
+
+        # 2. If team centres not yet established, try to build them
+        if not self._teams_ready:
+            if self._frame_count >= self.warmup_frames:
+                self._build_team_centers()
+            # Even if we just built them, fall through to assignment below
+
+        # 3. Assign teams
+        if self._teams_ready:
+            self._assign_pending_players()
+
+        # 4. Stamp detections
         for det in tracked_detections:
-            track_id = det['track_id']
-            
-            if track_id in self.team_assignments:
-                team_id = self.team_assignments[track_id]
+            tid = det['track_id']
+            if tid in self.team_assignments:
+                team_id = self.team_assignments[tid]
                 det['team_id'] = team_id
-                det['team_color'] = self.team_viz_colors.get(team_id, (128, 128, 128))
+                det['team_color'] = self.team_viz_colors[team_id]
             else:
-                det['team_id'] = -1  # Unclassified
+                det['team_id'] = -1
                 det['team_color'] = (128, 128, 128)
-        
+
         return tracked_detections
-    
-    def _determine_teams(self) -> None:
-        """Determine team assignments using color clustering"""
+
+    # ------------------------------------------------------------------
+    # Jersey colour extraction
+    # ------------------------------------------------------------------
+
+    def _extract_jersey_lab(self, frame: np.ndarray, bbox: List[float]) -> Optional[np.ndarray]:
+        """Extract dominant jersey colour in CIE-LAB from the upper-torso crop."""
         try:
-            # Prepare color data for clustering
-            all_colors = []
-            track_ids = []
-            
-            for track_id, colors in self.color_samples.items():
-                if len(colors) >= 3:  # Need minimum samples
-                    # Use mean color of samples for this track
-                    mean_color = np.array(colors).mean(axis=0)
-                    all_colors.append(mean_color)
-                    track_ids.append(track_id)
-            
-            if len(all_colors) < self.num_teams:
-                return
-            
-            # Cluster colors using K-means
-            all_colors = np.array(all_colors)
-            kmeans = KMeans(n_clusters=self.num_teams, random_state=42, n_init=10)
-            labels = kmeans.fit_predict(all_colors)
-            
-            # Assign teams
-            for track_id, team_id in zip(track_ids, labels):
-                self.team_assignments[track_id] = int(team_id)
-                self.color_samples[track_id] = []  # Clear samples after assignment
-            
-            # Store team colors (HSV)
-            for team_id, center in enumerate(kmeans.cluster_centers_):
-                hsv_color = tuple(center.astype(int))
-                self.team_colors_hsv[team_id] = hsv_color
-                # Convert HSV to BGR for visualization
-                self.team_colors_bgr[team_id] = self._hsv_to_bgr(hsv_color)
-            
-            self.teams_determined = True
-        
-        except Exception as e:
-            print(f"Error determining teams: {e}")
-    
-    def _classify_to_nearest_team(self, color: np.ndarray) -> int:
-        """
-        Classify a color to the nearest team based on Euclidean distance in HSV space
-        
-        Args:
-            color: HSV color as array
-            
-        Returns:
-            Team ID (0 or 1)
-        """
-        if not self.team_colors_hsv:
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            h = y2 - y1
+            w = x2 - x1
+            if h < 10 or w < 6:
+                return None
+
+            # Upper-torso crop (skip head ~20%, legs ~40%)
+            cy1 = max(0, y1 + int(h * 0.2))
+            cy2 = min(frame.shape[0], y1 + int(h * 0.6))
+            cx1 = max(0, x1 + int(w * 0.2))
+            cx2 = min(frame.shape[1], x2 - int(w * 0.2))
+            crop = frame[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                return None
+
+            # Convert to HSV for masking, LAB for colour
+            hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+            lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+
+            # Build mask: keep jersey-like pixels, reject grass / skin / dark / white
+            h_chan = hsv[:, :, 0]
+            s_chan = hsv[:, :, 1]
+            v_chan = hsv[:, :, 2]
+
+            # Reject very dark or very bright
+            mask = (v_chan > 40) & (v_chan < 250)
+            # Reject low-saturation (grays / whites) — but keep white jerseys via brightness
+            mask = mask & (s_chan > 25)
+            # Reject green / grass  (hue roughly 35-85 in OpenCV 0-180 range)
+            grass = (h_chan >= 30) & (h_chan <= 90) & (s_chan > 40)
+            mask = mask & (~grass)
+            # Reject skin tones (hue ~5-25, moderate saturation)
+            skin = (h_chan >= 5) & (h_chan <= 25) & (s_chan > 40) & (s_chan < 180)
+            mask = mask & (~skin)
+
+            valid = lab[mask]
+            if len(valid) < 20:
+                # Fallback: just use median of all non-dark pixels
+                fallback_mask = v_chan > 50
+                valid = lab[fallback_mask]
+                if len(valid) < 10:
+                    return None
+
+            # Dominant colour = median (fast & robust to outliers)
+            return np.median(valid, axis=0).astype(np.float32)
+
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # Team centre estimation
+    # ------------------------------------------------------------------
+
+    def _build_team_centers(self) -> None:
+        """Cluster all collected player colours into num_teams groups (LAB space)."""
+        # Compute per-player representative colour (median of history)
+        player_colors = {}
+        for tid, hist in self._color_history.items():
+            if len(hist) >= 3:
+                player_colors[tid] = np.median(np.array(hist), axis=0)
+
+        if len(player_colors) < self.num_teams:
+            return
+
+        tids = list(player_colors.keys())
+        X = np.array([player_colors[t] for t in tids], dtype=np.float32)
+
+        kmeans = KMeans(n_clusters=self.num_teams, n_init=10, random_state=42)
+        labels = kmeans.fit_predict(X)
+
+        self.team_centers_lab = kmeans.cluster_centers_  # (num_teams, 3)
+        self._teams_ready = True
+
+        # Assign these initial players
+        for tid, label in zip(tids, labels):
+            self.team_assignments[tid] = int(label)
+
+        print(f"[TeamClassifier] Centres built from {len(tids)} players.  "
+              f"LAB centres: {self.team_centers_lab.tolist()}")
+
+    # ------------------------------------------------------------------
+    # Assigning new / pending players
+    # ------------------------------------------------------------------
+
+    def _assign_pending_players(self) -> None:
+        """Assign any player that has enough colour history but no team yet."""
+        if self.team_centers_lab is None:
+            return
+
+        for tid, hist in self._color_history.items():
+            if tid in self.team_assignments:
+                continue  # already assigned — never change
+            if len(hist) < self._min_votes:
+                continue  # not enough evidence yet
+
+            # Majority-vote: classify each sample, pick the most common label
+            votes = []
+            for lab_color in hist:
+                dists = np.linalg.norm(self.team_centers_lab - lab_color, axis=1)
+                votes.append(int(np.argmin(dists)))
+
+            team_id = Counter(votes).most_common(1)[0][0]
+            self.team_assignments[tid] = team_id
+
+    # ------------------------------------------------------------------
+    # Nearest-team helper (used externally if needed)
+    # ------------------------------------------------------------------
+
+    def _classify_to_nearest_team(self, lab_color: np.ndarray) -> int:
+        if self.team_centers_lab is None:
             return 0
-        
-        min_distance = float('inf')
-        nearest_team = 0
-        
-        for team_id, team_color in self.team_colors_hsv.items():
-            distance = np.sqrt(np.sum((color - np.array(team_color))**2))
-            if distance < min_distance:
-                min_distance = distance
-                nearest_team = team_id
-        
-        return nearest_team
-    
-    def _hsv_to_bgr(self, hsv_color: Tuple[int, int, int]) -> Tuple[int, int, int]:
-        """
-        Convert HSV color to BGR
-        
-        Args:
-            hsv_color: (H, S, V) tuple
-            
-        Returns:
-            (B, G, R) tuple
-        """
-        hsv_img = np.uint8([[[hsv_color[0], hsv_color[1], hsv_color[2]]]])
-        bgr_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR)
-        b, g, r = bgr_img[0][0]
-        return (int(b), int(g), int(r))
-    
+        dists = np.linalg.norm(self.team_centers_lab - lab_color, axis=1)
+        return int(np.argmin(dists))
+
+    # ------------------------------------------------------------------
+    # Utility / query methods
+    # ------------------------------------------------------------------
+
+    def get_team_assignment(self, track_id: int) -> Optional[int]:
+        return self.team_assignments.get(track_id)
+
+    def get_all_assignments(self) -> Dict[int, int]:
+        return self.team_assignments.copy()
+
+    def get_team_color_bgr(self, team_id: int) -> Tuple[int, int, int]:
+        return self.team_viz_colors.get(team_id, (128, 128, 128))
+
+    def get_team_stats(self) -> Dict[int, int]:
+        stats = {i: 0 for i in range(self.num_teams)}
+        for t in self.team_assignments.values():
+            if t in stats:
+                stats[t] += 1
+        return stats
+
     def reassign_team(self, track_id: int, team_id: int) -> None:
-        """
-        Manually reassign a player to a different team
-        
-        Args:
-            track_id: Track ID of player
-            team_id: Team ID to assign (0 or 1)
-        """
         if 0 <= team_id < self.num_teams:
             self.team_assignments[track_id] = team_id
-            if track_id in self.color_samples:
-                del self.color_samples[track_id]
-    
-    def get_team_assignment(self, track_id: int) -> Optional[int]:
-        """Get team ID for a player"""
-        return self.team_assignments.get(track_id)
-    
-    def get_all_assignments(self) -> Dict[int, int]:
-        """Get all team assignments"""
-        return self.team_assignments.copy()
-    
-    def get_team_color_bgr(self, team_id: int) -> Tuple[int, int, int]:
-        """Get BGR visualization color for a team"""
-        return self.team_viz_colors.get(team_id, (128, 128, 128))
-    
-    def get_team_stats(self) -> Dict[int, int]:
-        """Get count of players per team"""
-        stats = {team_id: 0 for team_id in range(self.num_teams)}
-        for team_id in self.team_assignments.values():
-            stats[team_id] += 1
-        return stats
-    
-    def reset(self) -> None:
-        """Reset classifier (for new game/video)"""
-        self.team_assignments = {}
-        self.color_samples = defaultdict(list)
-        self.team_colors_hsv = {}
-        self.team_colors_bgr = {}
-        self.player_colors = {}
-        self.teams_determined = False
 
+    def reset(self) -> None:
+        self.team_assignments = {}
+        self._color_history = defaultdict(list)
+        self.team_centers_lab = None
+        self._teams_ready = False
+        self._frame_count = 0
